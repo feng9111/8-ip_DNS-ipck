@@ -1,0 +1,11 @@
+{
+  "name": "8-ip-dns-ipck",
+  "version": "0.9.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:lib": "node tools/build-lib.mjs",
+    "deploy": "wrangler deploy",
+    "verify": "node ../不上传_文档与验证/test/verify.mjs"
+  }
+}

@@ -1,0 +1,33 @@
+# 8号 h17 · 月度离线库更新（只在 GitHub 机器上做，绝不发生在 CF 部署路径上）
+# 生成 assets/geo/ → commit → push → 触发 Workers Builds 的一次纯上传部署。
+# 不需要 CF API Token / Secret / 绑卡 / KV 写权限；用仓库自带 GITHUB_TOKEN。
+# 更新失败只保留上一版库，站点不受影响。
+name: monthly IP library rebuild
+on:
+  schedule:
+    - cron: '7 6 1 * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: build library
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          node tools/build-lib.mjs
+          node -e "const m=require('./assets/geo/meta.json');if(m.status!=='ready'||m.rowCount<100000){console.log('invalid library; keeping previous');process.exit(1)};console.log('library rows',m.rowCount,m.version)"
+      - name: commit if changed
+        run: |
+          git config user.name "ipckit-bot"
+          git config user.email "ipckit-bot@users.noreply.github.com"
+          git add assets/geo
+          if git diff --cached --quiet; then echo "no library change, no deploy triggered"; exit 0; fi
+          git commit -m "chore: monthly DB-IP Lite library $(date -u +%Y-%m)"
+          git push

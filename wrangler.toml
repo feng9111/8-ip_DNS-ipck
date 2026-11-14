@@ -1,0 +1,36 @@
+# 8号 ip_DNS综合查询测试站 · ipckit · h17
+# h17 收口：离线库已经随包自带（assets/geo/ → 447 个分片 + meta.json，
+#   DB-IP Lite 2026-11，IPv4 732,778 行 / IPv6 733,044 行）。
+# 部署路径上没有任何自定义脚本：没有 postinstall、没有 [build].command、
+#   没有运行时装库、没有 KV 写入、没有下载/解压/排序。wrangler deploy 只做纯上传。
+# h13~h16 的 0 行 / 25 MiB 超限 / 2GB OOM / KV 权限，全部发生在「部署时造库」，
+#   这条链已整条删除，不可能再复现。
+# 运行时只读一个静态分片：零外网、零第三方、零日志。
+# 月度更新改由 .github/workflows/dbip-monthly.yml 在 GitHub 机器上生成并 commit，
+#   push 触发一次纯上传部署；更新失败只保留上一版库，绝不阻断网站。
+name = "8-ip-dns-ipck"
+main = "src/index.js"
+compatibility_date = "2026-11-13"
+account_id = "aaf1535472bd88c1440f64028060678e"
+
+# 静态库随部署上传；run_worker_first=true 保证请求先走 Worker，assets 只经绑定读取。
+[assets]
+directory = "./assets"
+binding = "ASSETS"
+run_worker_first = true
+
+# 兼容保留（旧分片若曾写入仍可读）；本版不写 KV。
+[[kv_namespaces]]
+binding = "GEO_DB"
+id = "caed430be1a74fa282624d6d1b9ef3a9"
+
+# cron 仅作轻量心跳：纯读状态，0 下载 / 0 解压 / 0 解析 / 0 写入。
+[triggers]
+crons = ["7 6 1,2,3 * *"]
+
+[vars]
+SITE_NAME = "ipckit"
+DEFAULT_LANG = "en"
+APP_VERSION = "h17"
+# 隔离测试态 = "false"；正式对外开放改 "true" 再 deploy（政策/同意/署名已齐）。
+PUBLIC_MODE = "false"

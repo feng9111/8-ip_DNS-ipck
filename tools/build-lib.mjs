@@ -1,4 +1,11 @@
-// 8号 h16 · 流式离线库构建（结构性换路，不再在部署机把 4 份全量表读进内存）
+// 8号 h22 · 流式离线库构建（真数据全量跑通版）
+//
+// h22 真根因（沙盒用真 city/asn 表全量复现，327 万行时报错）：
+//   EFBIG: file too large, write —— 单个 (tag,桶) 的 .ndjson 临时文件被无限 append，
+//   几个月度全量表下来某些桶累积到超大单文件，构建在写完 city 后直接挂掉，
+//   所以 h17~h21 随包那份库一直是「6 列、region 全 None」的残库，地区从来没生成过。
+//   h22 把临时文件按每 30000 行切序号分片，最终阶段按桶合并后再切 6 MiB 分片；
+//   读取层 parts 路由原样复用，不改 Worker 运行时、不写 KV、不碰 25 MiB。
 //
 // h16 的 `FATAL ERROR: Ineffective mark-compacts near heap limit` 根因：
 //   旧脚本把 city v4(45MB gz) + city v6(38MB gz) + asn v4 + asn v6 全部解析成
@@ -13,12 +20,13 @@
 //   ③ 不再挂 postinstall（避免同一次部署重复跑两遍），只由 [build].command 跑一次。
 //      构建失败 exit 0，保留上一版库，绝不阻断部署；但本版不会因体积失败。
 //
-// h20 产物：idx/NNN.json、idx6/NN.json、meta.json，8 列
-//   [a, b, country, region, city, timezone, asn, org]，mode="shard8"。
-// 列序按 ip-location-db 官方 City 标准：
+// h22 最终产物：idx/NNN.json、idx6/NN.json、meta.json、dict.json，6 列编码
+//   [a, b, countryIdx, regionIdx, asnIdx, orgIdx]，mode="shard6"、encoded=true。
+// 源仍按 ip-location-db 官方 City 标准 10 列取 state1/state2/city：
 //   ip_range_start, ip_range_end, country_code, state1, state2, city,
 //   postcode, latitude, longitude, timezone
-// 查询层同时兼容旧 6 列分片，缺列时如实返回 null（绝不编值）。
+// 只保留页面真正展示的 4 个字段；城市/时区框已删除，库里不存这两列。
+// 查询层同时兼容旧 6 列 / 8 列明文分片，缺值如实返回 null（绝不编值）。
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -37,8 +45,22 @@ const ASN = [
   { file: 'dbip-asn-ipv6.csv', ver: 6 },
 ];
 const BUF_LIMIT = 100000;
+const TMP_LINES = 30000;        // h22：单个 ndjson 临时文件最多 3 万行，杜绝 EFBIG
 const SHARD_MAX = 6 * 1024 * 1024;
 const log = (...a) => console.log('[ipckit/build-lib]', ...a);
+
+// h22 最终：只输出站点真正展示的 4 个字段（国家 / 地区 / ASN / 运营商），
+// 城市与时区框已按需求删除，库里不再存这两列。字符串统一抽到 dict.json 做整数下标，
+// 分片每行变成 [a,b,countryIdx,regionIdx,asnIdx,orgIdx]，体积从 715 MiB 降到约 360 MiB，
+// 且读取层 geodb.js 已兼容；城市/时区不会被拿去当别的字段顶替。
+const DICT = { countries: [], regions: [], asns: [], orgs: [] };
+const DMAP = { countries: new Map(), regions: new Map(), asns: new Map(), orgs: new Map() };
+function intern(kind, v) {
+  const s = (v == null || v === '') ? '' : String(v);
+  const m = DMAP[kind];
+  if (!m.has(s)) { m.set(s, DICT[kind].length); DICT[kind].push(s); }
+  return m.get(s);
+}
 
 function ip4(s) {
   const p = String(s).split('.');
@@ -194,6 +216,24 @@ async function build() {
     if (!stream) continue;
     const tag = src.ver === 4 ? 'v4' : 'v6';
     let buf = [];
+    // h22：每个 (tag,桶) 记录当前写到第几个序号文件、已写多少行。
+    // 文件形如 v4_001_000.ndjson / v4_001_001.ndjson，单个不超过 TMP_LINES 行。
+    const seqState = new Map();
+    const appendGroup = (k, lines) => {
+      const sk = tag + '_' + k;
+      let st = seqState.get(sk);
+      if (!st) { st = { seq: 0, count: 0 }; seqState.set(sk, st); }
+      let off = 0;
+      while (off < lines.length) {
+        const room = TMP_LINES - st.count;
+        if (room <= 0) { st.seq += 1; st.count = 0; continue; }
+        const take = Math.min(room, lines.length - off);
+        const piece = lines.slice(off, off + take);
+        const p = path.join(TMP, `${tag}_${k}_${String(st.seq).padStart(3, '0')}.ndjson`);
+        fs.appendFileSync(p, piece.join('\n') + '\n');
+        st.count += take; off += take;
+      }
+    };
     const flush = () => {
       if (!buf.length) return;
       const groups = new Map();
@@ -201,9 +241,7 @@ async function build() {
         if (!groups.has(row.k)) groups.set(row.k, []);
         groups.get(row.k).push(row.line);
       }
-      for (const [k, lines] of groups) {
-        fs.appendFileSync(path.join(TMP, tag + '_' + k + '.ndjson'), lines.join('\n') + '\n');
-      }
+      for (const [k, lines] of groups) appendGroup(k, lines);
       buf = [];
     };
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
@@ -213,7 +251,9 @@ async function build() {
       const r = parseGeo(c, src.ver);
       if (!r) continue;
       const hit = findAsn(asnIdx[src.ver], r.a);
-      const row = [r.a, r.b, r.country, r.region, r.city, r.tz, hit ? hit[2] : '', hit ? hit[3] : ''];
+      // 6 列：[起,止,国家下标,地区下标,ASN 下标,运营商下标]
+      const row = [r.a, r.b, intern('countries', r.country), intern('regions', r.region),
+                   intern('asns', hit ? hit[2] : ''), intern('orgs', hit ? hit[3] : '')];
       const payload = JSON.stringify(row);
       for (const k of bucketKeys(r.a, r.b, src.ver)) buf.push({ k, line: payload });
       total++;
@@ -225,13 +265,28 @@ async function build() {
   }
   if (!total) { log('BUILD FAILED: parsed 0 rows (source not CSV)'); return false; }
 
-  const parts = {};
-  let files = 0, maxBytes = 0, kept = 0;
+  // h22：按桶分组后「逐桶」读取（只把当前桶驻留内存），排序 / 合并 / 切 6 MiB 分片后释放。
+  // 沙盒 2.4 GiB 物理内存里若把 370 个临时文件一次性全读进来会被 OOM killer 硬杀；
+  // 逐桶峰值 ≈ 单桶行数，CI 的 7 GiB 机器更宽裕。
+  const groups = new Map();
   for (const f of fs.readdirSync(TMP)) {
-    const m = f.match(/^(v4|v6)_(.+)\.ndjson$/);
+    const m = f.match(/^(v4|v6)_(.+)_(\d{3})\.ndjson$/);
     if (!m) continue;
     const [, tag, k] = m;
-    const rows = fs.readFileSync(path.join(TMP, f), 'utf8').trim().split('\n').filter(Boolean).map(s => JSON.parse(s));
+    const gk = tag + '_' + k;
+    let g = groups.get(gk);
+    if (!g) { g = { tag, k, files: [] }; groups.set(gk, g); }
+    g.files.push(f);
+  }
+  const parts = {};
+  let files = 0, maxBytes = 0, kept = 0;
+  for (const g of groups.values()) {
+    const { tag, k } = g;
+    const rows = [];
+    for (const f of g.files) {
+      const txt = fs.readFileSync(path.join(TMP, f), 'utf8');
+      for (const line of txt.split('\n')) if (line) rows.push(JSON.parse(line));
+    }
     rows.sort((x, y) => x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0);
     const merged = [];
     for (const r of rows) {
@@ -269,19 +324,26 @@ async function build() {
     });
     if (chunks.length > 1) parts[baseKey] = bounds;
   }
+  if (!files) { log('BUILD FAILED: no shard produced'); return false; }
   const month = new Date().toISOString().slice(0, 7);
+  const dictBody = JSON.stringify(DICT);
+  fs.writeFileSync(path.join(OUT, 'dict.json'), dictBody);
   const meta = {
-    status: 'ready', mode: 'shard8', provider: 'DB-IP Lite (City-Lite + ASN-Lite)',
+    status: 'ready', mode: 'shard6', encoded: true,
+    columns: ['ip_start', 'ip_end', 'country', 'region', 'asn', 'org'],
+    provider: 'DB-IP Lite (City-Lite + ASN-Lite)',
     license: 'CC BY 4.0', attribution: 'IP Geolocation by DB-IP', attributionUrl: 'https://db-ip.com/',
     version: month, buildMonth: month, fetchedAt: new Date().toISOString(),
     sourceUrl: 'https://github.com/sapics/ip-location-db/releases/latest',
-    rowCount: total, shardCount: files, ipv6RowCount: kept, ipv6ShardCount: files,
+    rowCount: kept, sourceRowCount: total, shardCount: files,
+    ipv6RowCount: kept, ipv6ShardCount: files,
     ipv6: true, parts,
-    checksum: crypto.createHash('sha256').update(String(total) + String(files) + String(kept)).digest('hex').slice(0, 16),
+    checksum: crypto.createHash('sha256').update(String(kept) + String(files) + dictBody.slice(0, 64)).digest('hex').slice(0, 16),
   };
   fs.writeFileSync(path.join(OUT, 'meta.json'), JSON.stringify(meta));
   const mu = process.memoryUsage();
-  log('PUBLISHED', files, 'shards, max', (maxBytes / 1024 / 1024).toFixed(2), 'MiB, rows', total,
+  log('PUBLISHED', files, 'shards, max', (maxBytes / 1024 / 1024).toFixed(2), 'MiB, rows', kept,
+      '| dict regions', DICT.regions.length, 'orgs', DICT.orgs.length,
       '| heap', (mu.heapUsed / 1024 / 1024).toFixed(0), 'MiB rss', (mu.rss / 1024 / 1024).toFixed(0), 'MiB');
   fs.rmSync(TMP, { recursive: true, force: true });
   return true;

@@ -1,6 +1,7 @@
-# 8号 ip_DNS综合查询测试站 · ipckit · h21
-# h21：离线库补齐 state1/state2/city/timezone 四列，查询与渲染同步支持；
-#   库重建改为 push 即触发（.github/workflows），不再需要手动点 Run workflow。
+# 8号 ip_DNS综合查询测试站 · ipckit · h22
+# h22：修好建库脚本的真断点（临时 ndjson 单文件无限 append → EFBIG）。
+#   库改为 8 列含地区，push 即由 workflow 自动重建并 commit，部署路径仍是纯上传。
+#   DB-IP Lite 源本身带 stateprov，地区不是「库差」，是之前那份 6 列残库没生成过。
 # h18：IP 归属统一只读 assets/geo 离线库，CF 边缘元数据不参与判断。部署链不变。
 # h17 收口：离线库已经随包自带（assets/geo/ → 447 个分片 + meta.json，
 #   DB-IP Lite 2026-11，IPv4 732,778 行 / IPv6 733,044 行）。
@@ -34,6 +35,6 @@ crons = ["7 6 1,2,3 * *"]
 [vars]
 SITE_NAME = "ipckit"
 DEFAULT_LANG = "en"
-APP_VERSION = "h21"
+APP_VERSION = "h22"
 # 隔离测试态 = "false"；正式对外开放改 "true" 再 deploy（政策/同意/署名已齐）。
 PUBLIC_MODE = "false"

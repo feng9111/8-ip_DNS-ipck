@@ -78,6 +78,7 @@ function metaFrom(j, fallback) {
     ipv6RowCount: j.ipv6RowCount || null,
     ipv6ShardCount: j.ipv6ShardCount || null,
     ipv6: !!j.ipv6,
+    encoded: !!j.encoded,
     status: 'ready',
     // h16：子片路由表（baseKey → 各子片首行排序键）。缺省 {} 兼容旧版单分片库。
     parts: (j.parts && typeof j.parts === 'object') ? j.parts : {},
@@ -96,7 +97,13 @@ async function load(env) {
       if (t) {
         const j = JSON.parse(t);
         if (j && j.status === 'ready' && (j.mode === 'shard' || j.mode === 'shard6' || j.mode === 'shard8')) {
-          CACHE = { mode: j.mode, source: 'assets', meta: metaFrom(j, IP_LIB), shards: {}, shards6: {}, at: Date.now() };
+          let dict = null;
+          if (j.encoded) {
+            const dt = await assetText(env, '/geo/dict.json');
+            if (!dt) throw new Error('encoded library missing dict.json');
+            dict = JSON.parse(dt);
+          }
+          CACHE = { mode: j.mode, source: 'assets', meta: metaFrom(j, IP_LIB), dict, shards: {}, shards6: {}, at: Date.now() };
           return CACHE;
         }
       }
@@ -108,7 +115,14 @@ async function load(env) {
       if (metaObj) {
         const j = JSON.parse(await readText(metaObj));
         if (j && j.status === 'ready' && (j.mode === 'shard' || j.mode === 'shard6' || j.mode === 'shard8')) {
-          CACHE = { mode: j.mode, source: 'kv', meta: metaFrom(j, IP_LIB), shards: {}, shards6: {}, at: Date.now() };
+          let dict = null;
+          if (j.encoded) {
+            const d = await env.GEO_DB.get('dict.json');
+            const dt = d ? await readText(d) : null;
+            if (!dt) throw new Error('encoded library missing dict.json');
+            dict = JSON.parse(dt);
+          }
+          CACHE = { mode: j.mode, source: 'kv', meta: metaFrom(j, IP_LIB), dict, shards: {}, shards6: {}, at: Date.now() };
           return CACHE;
         }
       }
@@ -273,10 +287,23 @@ async function shardRows6(env, firstByte, hex, c) {
   return rows;
 }
 
-// h20：8 列 [a,b,country,region,city,tz,asn,org]；旧 6 列 [a,b,country,region,asn,org] 兼容。
+// 8 列 [a,b,country,region,city,tz,asn,org]；旧 6 列明文 [a,b,country,region,asn,org]；
+// h22 编码 6 列 [a,b,countryIdx,regionIdx,asnIdx,orgIdx] + dict.json。
 // 缺列一律 null，不猜、不拿别的字段顶替。
-function rowToFields(r) {
+function rowToFields(r, dict) {
   if (!r) return null;
+  // 编码库：第 3 项是整数下标（旧明文库这里是两位国家码字符串），据此自动区分。
+  if (dict && r.length === 6 && typeof r[2] === 'number') {
+    const val = (k, i) => { const v = dict[k] && dict[k][i]; return v ? v : null; };
+    const a = dict.asns && dict.asns[r[4]];
+    return {
+      country: val('countries', r[2]),
+      region: val('regions', r[3]),
+      city: null, tz: null,
+      asn: a ? 'AS' + a : null,
+      org: val('orgs', r[5]),
+    };
+  }
   if (r.length >= 8) {
     return {
       country: r[2] || null,
@@ -297,26 +324,26 @@ function rowToFields(r) {
   };
 }
 
-function binaryLookup(rows, n) {
+function binaryLookup(rows, n, dict) {
   let lo = 0, hi = rows.length - 1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const r = rows[mid];
     if (n < r[0]) hi = mid - 1;
     else if (n > r[1]) lo = mid + 1;
-    else return rowToFields(r);
+    else return rowToFields(r, dict);
   }
   return null;
 }
 
-function binaryLookupHex(rows, hex) {
+function binaryLookupHex(rows, hex, dict) {
   let lo = 0, hi = rows.length - 1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
     const r = rows[mid];
     if (hex < r[0]) hi = mid - 1;
     else if (hex > r[1]) lo = mid + 1;
-    else return rowToFields(r);
+    else return rowToFields(r, dict);
   }
   return null;
 }
@@ -337,7 +364,7 @@ export async function lookup(ip, env) {
       rows = c.rows;
     }
     if (!rows || !rows.length) return null;
-    return binaryLookup(rows, n);
+    return binaryLookup(rows, n, c.dict);
   }
   if (kind === 6) {
     const v = parseIpv6(ip);
@@ -352,7 +379,7 @@ export async function lookup(ip, env) {
       rows = c.rows6 || [];
     }
     if (!rows || !rows.length) return null;
-    return binaryLookupHex(rows, hex);
+    return binaryLookupHex(rows, hex, c.dict);
   }
   return null;
 }

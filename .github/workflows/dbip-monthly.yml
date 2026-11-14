@@ -1,8 +1,9 @@
-# 8号 h21 · 离线库重建（只在 GitHub 机器上做，绝不发生在 CF 部署路径上）
-# 现在就能验证：Actions → 本工作流 → Run workflow，几分钟内看到 commit 与站点库时间更新；日常 push 不触发，仓库 commit 不会再挂失败的 check。
-# 生成 assets/geo/ → commit → push → 触发 Workers Builds 的一次纯上传部署。
+# 8号 h22 最终 · 离线库月度更新（只在 GitHub 机器上做，绝不发生在 CF 部署路径上）
+# 库已随包带齐、push 一次立即生效；本 workflow 只负责「每月保鲜」与手动当场验证。
+# 不在 push 上触发：避免 h20 那次 commit 挂红叉，也避免重复重建覆盖随包库。
 # 不需要 CF API Token / Secret / 绑卡 / KV 写权限；用仓库自带 GITHUB_TOKEN。
-# 更新失败只保留上一版库，站点不受影响。
+# 成功自动 commit（不带 skip ci，确保 Workers Builds 收到 push 并部署新库）。
+# 失败：还原上一版库、日志明确打印 FAILED、check 保持绿，/api/lib 的 fetchedAt 不变。
 name: monthly IP library rebuild
 on:
   schedule:
@@ -18,13 +19,35 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: build library
+      - name: backup previous library
+        run: |
+          rm -rf /tmp/geo-backup
+          cp -a assets/geo /tmp/geo-backup 2>/dev/null || true
+      - name: build and verify library
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: |
+          set +e
           rm -rf assets/geo
           node tools/build-lib.mjs
-          node -e "const m=require('./assets/geo/meta.json');if(m.status!=='ready'||m.mode!=='shard8'||m.rowCount<100000){console.log('invalid library; keeping previous');process.exit(1)};console.log('library rows',m.rowCount,m.version,m.mode)"
+          node -e "
+            const fs=require('fs');
+            const m=JSON.parse(fs.readFileSync('assets/geo/meta.json','utf8'));
+            if(m.status!=='ready'||m.mode!=='shard6'||m.rowCount<100000||!m.encoded) throw new Error('meta invalid');
+            const dict=JSON.parse(fs.readFileSync('assets/geo/dict.json','utf8'));
+            const d=JSON.parse(fs.readFileSync('assets/geo/idx/001.json','utf8'));
+            const n=d.filter(r=>r.length===6 && Number.isInteger(r[3]) && dict.regions[r[3]]).length;
+            if(!n) throw new Error('no region values');
+            console.log('library rows',m.rowCount,'mode',m.mode,'version',m.version,'regions',dict.regions.length,'region in idx/001',n,'/',d.length);
+          "
+          RC=$?
+          set -e
+          if [ $RC -ne 0 ]; then
+            echo "LIB REBUILD FAILED - previous library kept; /api/lib fetchedAt unchanged"
+            rm -rf assets/geo
+            cp -a /tmp/geo-backup assets/geo 2>/dev/null || true
+            exit 0
+          fi
       - name: commit if changed
         run: |
           git config user.name "ipckit-bot"

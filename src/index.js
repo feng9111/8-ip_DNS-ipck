@@ -1,4 +1,5 @@
-// 8号 ip_DNS综合查询测试站 h17 · CF Worker 入口
+// 8号 ip_DNS综合查询测试站 h18 · CF Worker 入口
+// h18：IP 归属统一只读离线库；CF 边缘仅提供 cf-connecting-ip。
 // h17：离线库已随包自带，部署路径零脚本；运行时只读一个静态分片。
 // h16：装库搬到部署构建阶段（tools/build-lib.mjs），运行时零下载/零解压/零解析，修掉 Error 1102。
 //      库改为随部署上传的静态 assets；KV 仅作兼容回退；月度更新由 CI 空 commit 触发重建。
@@ -113,6 +114,8 @@ export default {
         consentRequired: true,
         features: { ip: true, arbitraryIp: true, dns: false, webrtc: false },
         ipVersions: [4, 6],
+        dataSource: 'DB-IP Lite offline library only (unified for self + manual)',
+        edgeAttributionUsed: false,
         time: new Date().toISOString(),
       }, 200, env);
     }

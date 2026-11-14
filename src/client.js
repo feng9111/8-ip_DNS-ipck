@@ -86,7 +86,7 @@ export const CLIENT_JS = `
       esc(ip.ip || T('state.notExposed', '浏览器未暴露')) + '</b></div>';
     out += '<div class="ipck-grid-fields">';
     for (var i = 0; i < rows.length; i++) {
-      var v = (rows[i][2] == null || rows[i][2] === '') ? T('state.notExposed', '浏览器未暴露') : rows[i][2];
+      var v = (rows[i][2] == null || rows[i][2] === '') ? T('state.noLibField', '该库未提供此字段') : rows[i][2];
       out += '<div class="ipck-field"><span>' + esc(T(rows[i][0], rows[i][1])) + '</span><b>' + esc(v) + '</b></div>';
     }
     out += '</div>';
@@ -142,7 +142,7 @@ export const CLIENT_JS = `
     out += '<div class="ipck-summary-ip"><span>' + esc(T('ov.ip', 'IP 地址')) + '</span><b>' + esc(ip.ip || '') + '</b></div>';
     out += '<div class="ipck-grid-fields">';
     for (var i = 0; i < rows.length; i++) {
-      var v = (rows[i][2] == null || rows[i][2] === '') ? T('state.notExposed', '浏览器未暴露') : rows[i][2];
+      var v = (rows[i][2] == null || rows[i][2] === '') ? T('state.noLibField', '该库未提供此字段') : rows[i][2];
       out += '<div class="ipck-field"><span>' + esc(T(rows[i][0], rows[i][1])) + '</span><b>' + esc(v) + '</b></div>';
     }
     out += '</div>';

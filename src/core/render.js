@@ -49,14 +49,16 @@ export function renderResultBlocks(data, labels, mode) {
       : '<div class="ipck-summary-ip"><span>' + escHtml(L('ov.ip')) + '</span><b>' + escHtml(d.ip.ip || L('state.notExposed')) + '</b></div>';
     var grid = '<div class="ipck-grid-fields">';
     for (var i = 0; i < rows.length; i++) {
-      var val = (rows[i][1] == null || rows[i][1] === '') ? L('state.notExposed') : rows[i][1];
+      var val = (rows[i][1] == null || rows[i][1] === '') ? L('state.noLibField') : rows[i][1];
       grid += '<div class="ipck-field"><span>' + escHtml(L(rows[i][0])) + '</span><b>' + escHtml(val) + '</b></div>';
     }
     grid += '</div>';
-    // h5 · 双源交叉校验：不替用户在两个真实观测里选一个，冲突就逐项列出。
-    var x = d.ip.crossCheck || { state: 'no-secondary', diffs: [] };
-    var crossHtml = '<div class="ipck-cross ' + (x.state === 'mismatch' ? 'warn' : (x.state === 'match' ? 'ok' : 'idle')) + '">';
-    if (x.state === 'no-secondary') {
+    // h18 · 统一数据源：不再并列两个 ASN，横幅只交代「只认离线库」。
+    var x = d.ip.crossCheck || { state: 'unified', diffs: [] };
+    var crossHtml = '<div class="ipck-cross ' + (x.state === 'mismatch' ? 'warn' : ((x.state === 'match' || x.state === 'unified') ? 'ok' : 'idle')) + '">';
+    if (x.state === 'unified') {
+      crossHtml += '<b>' + escHtml(L('ip.unified')) + '</b>';
+    } else if (x.state === 'no-secondary') {
       crossHtml += '<b>' + escHtml(L('ip.crossNone')) + '</b><p>' + escHtml(L('ip.crossNoneBody')) + '</p>';
     } else if (x.state === 'mismatch') {
       crossHtml += '<b>' + escHtml(L('ip.crossMismatch')) + '</b><table class="ipck-table"><thead><tr><th>' + escHtml(L('ip.crossField')) + '</th><th>' + escHtml(L('ip.crossEdge')) + '</th><th>' + escHtml(L('ip.crossLibrary')) + '</th></tr></thead><tbody>';

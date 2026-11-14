@@ -1,4 +1,5 @@
-# 8号 h17 · 月度离线库更新（只在 GitHub 机器上做，绝不发生在 CF 部署路径上）
+# 8号 h18 · 月度离线库更新（只在 GitHub 机器上做，绝不发生在 CF 部署路径上）
+# 现在就能验证：Actions → 本工作流 → Run workflow，几分钟内看到 commit 与站点库时间更新。
 # 生成 assets/geo/ → commit → push → 触发 Workers Builds 的一次纯上传部署。
 # 不需要 CF API Token / Secret / 绑卡 / KV 写权限；用仓库自带 GITHUB_TOKEN。
 # 更新失败只保留上一版库，站点不受影响。
@@ -31,3 +32,4 @@ jobs:
           if git diff --cached --quiet; then echo "no library change, no deploy triggered"; exit 0; fi
           git commit -m "chore: monthly DB-IP Lite library $(date -u +%Y-%m)"
           git push
+          echo "published library at $(date -u +%Y-%m-%dT%H:%M:%SZ)"

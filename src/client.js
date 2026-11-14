@@ -77,16 +77,19 @@ export const CLIENT_JS = `
     }
     var f = ip.fields || {};
     var G = geoCtx();
+    // h21 · 库有什么就显示什么：候选四项，值为空整块不渲染，绝不摆空框、绝不写占位。
     var rows = [
-      ['ov.country', '国家', loc(G, 'country', f.country)], ['ov.region', '地区', loc(G, 'region', f.region)],
-      ['ov.asn', 'ASN', f.asn], ['ov.isp', '运营商', loc(G, 'isp', f.isp)],
-      ['ov.tz', '时区', loc(G, 'tz', f.tz)], ['ip.field.city', '城市（库估计）', loc(G, 'city', f.city)]
+      ['ov.country', '国家', loc(G, 'country', f.country)],
+      ['ov.region', '地区', loc(G, 'region', f.region)],
+      ['ov.asn', 'ASN', f.asn],
+      ['ov.isp', '运营商', loc(G, 'isp', f.isp)]
     ];
     var out = subjectLine(ip, false) + '<div class="ipck-summary-ip"><span>' + esc(T('ov.ip', 'IP 地址')) + '</span><b>' +
       esc(ip.ip || T('state.notExposed', '浏览器未暴露')) + '</b></div>';
     out += '<div class="ipck-grid-fields">';
     for (var i = 0; i < rows.length; i++) {
-      var v = (rows[i][2] == null || rows[i][2] === '') ? T('state.noLibField', '该库未提供此字段') : rows[i][2];
+      var v = rows[i][2];
+      if (v == null || v === '') continue;
       out += '<div class="ipck-field"><span>' + esc(T(rows[i][0], rows[i][1])) + '</span><b>' + esc(v) + '</b></div>';
     }
     out += '</div>';
@@ -135,14 +138,18 @@ export const CLIENT_JS = `
     }
     var f = ip.fields || {};
     var G = geoCtx();
+    // h21 · 同上：只渲染该次命中里真实有值的字段。
     var rows = [
-      ['ov.country', '国家', loc(G, 'country', f.country)], ['ov.region', '地区', loc(G, 'region', f.region)],
-      ['ov.asn', 'ASN', f.asn], ['ov.isp', '运营商', loc(G, 'isp', f.isp)]
+      ['ov.country', '国家', loc(G, 'country', f.country)],
+      ['ov.region', '地区', loc(G, 'region', f.region)],
+      ['ov.asn', 'ASN', f.asn],
+      ['ov.isp', '运营商', loc(G, 'isp', f.isp)]
     ];
     out += '<div class="ipck-summary-ip"><span>' + esc(T('ov.ip', 'IP 地址')) + '</span><b>' + esc(ip.ip || '') + '</b></div>';
     out += '<div class="ipck-grid-fields">';
     for (var i = 0; i < rows.length; i++) {
-      var v = (rows[i][2] == null || rows[i][2] === '') ? T('state.noLibField', '该库未提供此字段') : rows[i][2];
+      var v = rows[i][2];
+      if (v == null || v === '') continue;
       out += '<div class="ipck-field"><span>' + esc(T(rows[i][0], rows[i][1])) + '</span><b>' + esc(v) + '</b></div>';
     }
     out += '</div>';

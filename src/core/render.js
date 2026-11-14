@@ -40,16 +40,18 @@ export function renderResultBlocks(data, labels, mode) {
     ipHtml = '<div class="ipck-notice"><b>' + escHtml(L('ip.edgeMissingTitle')) + '</b><p>' + escHtml(L('ip.edgeMissingBody')) + '</p></div>';
   } else {
     var f = d.ip.fields || {};
+    // h21 · 库实际有值才渲染；本库无 city / timezone 列，故不摆这两格。
     var rows = [
-      ['ov.country', loc('country', f.country)], ['ov.region', loc('region', f.region)], ['ov.asn', f.asn],
-      ['ov.isp', loc('isp', f.isp)], ['ov.tz', loc('tz', f.tz)], ['ip.field.city', loc('city', f.city)],
+      ['ov.country', loc('country', f.country)], ['ov.region', loc('region', f.region)],
+      ['ov.asn', f.asn], ['ov.isp', loc('isp', f.isp)],
     ];
     var big = m === 'ip'
       ? '<div class="ipck-big">' + escHtml(d.ip.ip || L('state.notExposed')) + '</div>'
       : '<div class="ipck-summary-ip"><span>' + escHtml(L('ov.ip')) + '</span><b>' + escHtml(d.ip.ip || L('state.notExposed')) + '</b></div>';
     var grid = '<div class="ipck-grid-fields">';
     for (var i = 0; i < rows.length; i++) {
-      var val = (rows[i][1] == null || rows[i][1] === '') ? L('state.noLibField') : rows[i][1];
+      var val = rows[i][1];
+      if (val == null || val === '') continue;
       grid += '<div class="ipck-field"><span>' + escHtml(L(rows[i][0])) + '</span><b>' + escHtml(val) + '</b></div>';
     }
     grid += '</div>';

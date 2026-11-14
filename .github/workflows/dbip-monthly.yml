@@ -1,10 +1,13 @@
-# 8号 h18 · 月度离线库更新（只在 GitHub 机器上做，绝不发生在 CF 部署路径上）
+# 8号 h20 · 离线库重建（只在 GitHub 机器上做，绝不发生在 CF 部署路径上）
 # 现在就能验证：Actions → 本工作流 → Run workflow，几分钟内看到 commit 与站点库时间更新。
 # 生成 assets/geo/ → commit → push → 触发 Workers Builds 的一次纯上传部署。
 # 不需要 CF API Token / Secret / 绑卡 / KV 写权限；用仓库自带 GITHUB_TOKEN。
 # 更新失败只保留上一版库，站点不受影响。
 name: monthly IP library rebuild
 on:
+  push:
+    paths-ignore:
+      - 'assets/geo/**'
   schedule:
     - cron: '7 6 1 * *'
   workflow_dispatch:
@@ -22,8 +25,9 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: |
+          rm -rf assets/geo
           node tools/build-lib.mjs
-          node -e "const m=require('./assets/geo/meta.json');if(m.status!=='ready'||m.rowCount<100000){console.log('invalid library; keeping previous');process.exit(1)};console.log('library rows',m.rowCount,m.version)"
+          node -e "const m=require('./assets/geo/meta.json');if(m.status!=='ready'||m.mode!=='shard8'||m.rowCount<100000){console.log('invalid library; keeping previous');process.exit(1)};console.log('library rows',m.rowCount,m.version,m.mode)"
       - name: commit if changed
         run: |
           git config user.name "ipckit-bot"

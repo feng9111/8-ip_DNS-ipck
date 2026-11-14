@@ -1,4 +1,6 @@
-# 8号 ip_DNS综合查询测试站 · ipckit · h18
+# 8号 ip_DNS综合查询测试站 · ipckit · h20
+# h20：离线库补齐 state1/state2/city/timezone 四列，查询与渲染同步支持；
+#   库重建改为 push 即触发（.github/workflows），不再需要手动点 Run workflow。
 # h18：IP 归属统一只读 assets/geo 离线库，CF 边缘元数据不参与判断。部署链不变。
 # h17 收口：离线库已经随包自带（assets/geo/ → 447 个分片 + meta.json，
 #   DB-IP Lite 2026-11，IPv4 732,778 行 / IPv6 733,044 行）。
@@ -32,6 +34,6 @@ crons = ["7 6 1,2,3 * *"]
 [vars]
 SITE_NAME = "ipckit"
 DEFAULT_LANG = "en"
-APP_VERSION = "h18"
+APP_VERSION = "h20"
 # 隔离测试态 = "false"；正式对外开放改 "true" 再 deploy（政策/同意/署名已齐）。
 PUBLIC_MODE = "false"

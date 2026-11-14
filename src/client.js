@@ -66,13 +66,13 @@ export const CLIENT_JS = `
     var d = data || {};
     if (!d.started) return '<div class="ipck-empty">' + esc(T('ov.empty', '尚未检测')) + '</div>';
     if (d.ipError || !d.ip) {
-      return '<div class="ipck-notice"><b>' + esc(T('ip.apiUnreachableTitle', '边缘接口未连通')) + '</b><p>' +
+      return '<div class="ipck-notice"><b>' + esc(T('ip.apiUnreachableTitle', '接口未连通')) + '</b><p>' +
         esc(T('ip.apiUnreachableBody', '/api/ip 未返回数据；这不是浏览器未暴露。')) + '</p></div>';
     }
     var ip = d.ip;
     if (ip.queryMode === 'manual') return manualIpHtml(ip);
     if (ip.ip == null && ip.edgeOk === false) {
-      return '<div class="ipck-notice"><b>' + esc(T('ip.edgeMissingTitle', '未注入 cf-connecting-ip')) + '</b><p>' +
+      return '<div class="ipck-notice"><b>' + esc(T('ip.edgeMissingTitle', '未取得本次连接 IP')) + '</b><p>' +
         esc(T('ip.edgeMissingBody', '请把域名设为橙云代理并把 route 绑定到本 Worker。')) + '</p></div>';
     }
     var f = ip.fields || {};
@@ -184,7 +184,7 @@ export const CLIENT_JS = `
     if (consentBox.checked) {
       safeSet(CONSENT_KEY, 'granted');
       safeSet(RECEIPT_KEY, JSON.stringify({
-        site: 'ipckit', build: page.version || 'h17', policyVersion: page.policyVersion || '',
+        site: 'ipckit', build: page.version || 'h19', policyVersion: page.policyVersion || '',
         scope: 'ip-lookup (self connection + user-entered IP, local offline library only)', legalBasis: 'GDPR Art.6(1)(a) consent',
         consentedAt: new Date().toISOString(), lang: page.lang || '',
         note: 'Device-local receipt. No server-side record exists.'

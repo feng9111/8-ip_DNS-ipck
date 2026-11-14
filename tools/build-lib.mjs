@@ -13,8 +13,12 @@
 //   ③ 不再挂 postinstall（避免同一次部署重复跑两遍），只由 [build].command 跑一次。
 //      构建失败 exit 0，保留上一版库，绝不阻断部署；但本版不会因体积失败。
 //
-// 产物格式与 h16 完全一致：idx/NNN.json、idx6/NN.json、meta.json（6 列 [a,b,country,region,asn,org]），
-// 因此 Worker 查询层无需重写，只需把读取通道改为「assets 优先、KV 兼容回退」。
+// h20 产物：idx/NNN.json、idx6/NN.json、meta.json，8 列
+//   [a, b, country, region, city, timezone, asn, org]，mode="shard8"。
+// 列序按 ip-location-db 官方 City 标准：
+//   ip_range_start, ip_range_end, country_code, state1, state2, city,
+//   postcode, latitude, longitude, timezone
+// 查询层同时兼容旧 6 列分片，缺列时如实返回 null（绝不编值）。
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -77,21 +81,37 @@ function csvLine(line) {
   out.push(cur); return out;
 }
 
-// 自适应列：跳过前两列 IP，找第一个 ISO 国家码；其后第一个非国家码文本作为 region。
-// 不依赖 DB-IP City-Lite 的具体列序，避免 h6 那次把 continent_code 当 country 的问题。
+// h20：按 ip-location-db 官方 City 标准 10 列取字段。
+//   0 start / 1 end / 2 country_code / 3 state1 / 4 state2 / 5 city
+//   6 postcode / 7 lat / 8 lon / 9 timezone
+// 旧脚本用「自适应找第一个两字母码」的方式，遇到 DB-IP 原始列序会把国家全名
+// 当成地区；这里改成位置优先 + 合法性校验，格式异常才回退启发式。
+const CONTINENTS = new Set(['AF', 'AN', 'AS', 'EU', 'NA', 'OC', 'SA']);
+const clean = (v) => String(v == null ? '' : v).trim().replace(/^"|"$/g, '').slice(0, 80);
+
 function parseGeo(c, ver) {
   const a = ipNum(c[0], ver), b = ipNum(c[1], ver);
   if (a === null || b === null) return null;
-  // h17：旧版把两字母值一律过滤，DB-IP Lite 的州/省常是缩写（CA / GD），
-  //      导致整库 region 全为 null。这里只排除洲码与 country 自身。
-  const CONTINENTS = new Set(['AF', 'AN', 'AS', 'EU', 'NA', 'OC', 'SA']);
-  let country = null, region = null;
-  for (let i = 2; i < c.length; i++) {
-    const v = (c[i] || '').trim().replace(/^"|"$/g, '');
-    if (!country && /^[A-Z]{2}$/.test(v) && !CONTINENTS.has(v)) { country = v; continue; }
-    if (country && v && !region && v !== country && !CONTINENTS.has(v)) { region = v.slice(0, 80); break; }
+  const cc = clean(c[2]);
+  if (/^[A-Z]{2}$/.test(cc) && !CONTINENTS.has(cc)) {
+    const s1 = clean(c[3]), s2 = clean(c[4]);
+    const region = (s1 && s1 !== cc && !CONTINENTS.has(s1)) ? s1
+                 : ((s2 && s2 !== cc && !CONTINENTS.has(s2)) ? s2 : null);
+    const city = clean(c[5]) || null;
+    const tz = clean(c[9]) || null;
+    return { a, b, country: cc, region, city, tz };
   }
-  return { a, b, country, region };
+  // 回退：DB-IP 原始 11 列（含 continent_code/name 与 country_name）。
+  let country = null, region = null, city = null, tz = null;
+  for (let i = 2; i < c.length; i++) {
+    const v = clean(c[i]);
+    if (!country && /^[A-Z]{2}$/.test(v) && !CONTINENTS.has(v)) { country = v; continue; }
+    if (!country) continue;
+    if (!region && v && v !== country && !CONTINENTS.has(v) && !/^[A-Z]{2}$/.test(v)) { region = v; continue; }
+    if (!city && region && v && v !== region && !CONTINENTS.has(v) && !/^[A-Z]{2}$/.test(v)) { city = v; continue; }
+    if (!tz && v && v.indexOf('/') > 0) { tz = v; break; }
+  }
+  return { a, b, country, region, city, tz };
 }
 
 async function openStream(file, fromDir) {
@@ -164,6 +184,7 @@ async function build() {
   fs.rmSync(TMP, { recursive: true, force: true });
   fs.mkdirSync(TMP, { recursive: true });
   fs.mkdirSync(OUT, { recursive: true });
+  for (const d of ['idx', 'idx6']) fs.rmSync(path.join(OUT, d), { recursive: true, force: true });
 
   const asnIdx = { 4: await readAsnIndex(fromDir, 4), 6: await readAsnIndex(fromDir, 6) };
   let total = 0;
@@ -192,7 +213,7 @@ async function build() {
       const r = parseGeo(c, src.ver);
       if (!r) continue;
       const hit = findAsn(asnIdx[src.ver], r.a);
-      const row = [r.a, r.b, r.country, r.region, hit ? hit[2] : '', hit ? hit[3] : ''];
+      const row = [r.a, r.b, r.country, r.region, r.city, r.tz, hit ? hit[2] : '', hit ? hit[3] : ''];
       const payload = JSON.stringify(row);
       for (const k of bucketKeys(r.a, r.b, src.ver)) buf.push({ k, line: payload });
       total++;
@@ -217,7 +238,8 @@ async function build() {
       const last = merged[merged.length - 1];
       if (last && r[0] <= last[1] + 1 &&
           String(last[2]) === String(r[2]) && String(last[3]) === String(r[3]) &&
-          String(last[4]) === String(r[4]) && String(last[5]) === String(r[5])) {
+          String(last[4]) === String(r[4]) && String(last[5]) === String(r[5]) &&
+          String(last[6]) === String(r[6]) && String(last[7]) === String(r[7])) {
         if (r[1] > last[1]) last[1] = r[1];
         continue;
       }
@@ -249,7 +271,7 @@ async function build() {
   }
   const month = new Date().toISOString().slice(0, 7);
   const meta = {
-    status: 'ready', mode: 'shard6', provider: 'DB-IP Lite (City-Lite + ASN-Lite)',
+    status: 'ready', mode: 'shard8', provider: 'DB-IP Lite (City-Lite + ASN-Lite)',
     license: 'CC BY 4.0', attribution: 'IP Geolocation by DB-IP', attributionUrl: 'https://db-ip.com/',
     version: month, buildMonth: month, fetchedAt: new Date().toISOString(),
     sourceUrl: 'https://github.com/sapics/ip-location-db/releases/latest',

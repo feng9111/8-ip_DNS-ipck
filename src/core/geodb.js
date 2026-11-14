@@ -95,7 +95,7 @@ async function load(env) {
       const t = await assetText(env, '/geo/meta.json');
       if (t) {
         const j = JSON.parse(t);
-        if (j && j.status === 'ready' && (j.mode === 'shard' || j.mode === 'shard6')) {
+        if (j && j.status === 'ready' && (j.mode === 'shard' || j.mode === 'shard6' || j.mode === 'shard8')) {
           CACHE = { mode: j.mode, source: 'assets', meta: metaFrom(j, IP_LIB), shards: {}, shards6: {}, at: Date.now() };
           return CACHE;
         }
@@ -107,7 +107,7 @@ async function load(env) {
       const metaObj = await env.GEO_DB.get('meta.json');
       if (metaObj) {
         const j = JSON.parse(await readText(metaObj));
-        if (j && j.status === 'ready' && (j.mode === 'shard' || j.mode === 'shard6')) {
+        if (j && j.status === 'ready' && (j.mode === 'shard' || j.mode === 'shard6' || j.mode === 'shard8')) {
           CACHE = { mode: j.mode, source: 'kv', meta: metaFrom(j, IP_LIB), shards: {}, shards6: {}, at: Date.now() };
           return CACHE;
         }
@@ -147,7 +147,7 @@ export async function libMeta(env) {
   const c = await load(env);
   const m = Object.assign({}, c.meta, {
     rowCount: c.mode === 'full' ? c.rows.length : c.meta.rowCount,
-    from: (c.mode === 'shard' || c.mode === 'shard6') ? (c.source === 'assets' ? 'assets' : 'kv-sharded') : (c.mode === 'full' ? 'kv' : 'inline'),
+    from: (c.mode === 'shard' || c.mode === 'shard6' || c.mode === 'shard8') ? (c.source === 'assets' ? 'assets' : 'kv-sharded') : (c.mode === 'full' ? 'kv' : 'inline'),
     mode: c.mode,
   });
   delete m.parts; // 路由表只供内部查询，不塞进 /api/health 与页面
@@ -273,6 +273,30 @@ async function shardRows6(env, firstByte, hex, c) {
   return rows;
 }
 
+// h20：8 列 [a,b,country,region,city,tz,asn,org]；旧 6 列 [a,b,country,region,asn,org] 兼容。
+// 缺列一律 null，不猜、不拿别的字段顶替。
+function rowToFields(r) {
+  if (!r) return null;
+  if (r.length >= 8) {
+    return {
+      country: r[2] || null,
+      region: r[3] || null,
+      city: r[4] || null,
+      tz: r[5] || null,
+      asn: r[6] != null && r[6] !== '' ? 'AS' + r[6] : null,
+      org: r[7] || null,
+    };
+  }
+  return {
+    country: r[2] || null,
+    region: r[3] || null,
+    city: null,
+    tz: null,
+    asn: r[4] != null && r[4] !== '' ? 'AS' + r[4] : null,
+    org: r[5] || null,
+  };
+}
+
 function binaryLookup(rows, n) {
   let lo = 0, hi = rows.length - 1;
   while (lo <= hi) {
@@ -280,7 +304,7 @@ function binaryLookup(rows, n) {
     const r = rows[mid];
     if (n < r[0]) hi = mid - 1;
     else if (n > r[1]) lo = mid + 1;
-    else return { country: r[2] || null, region: r[3] || null, asn: r[4] != null && r[4] !== '' ? 'AS' + r[4] : null, org: r[5] || null };
+    else return rowToFields(r);
   }
   return null;
 }
@@ -292,12 +316,12 @@ function binaryLookupHex(rows, hex) {
     const r = rows[mid];
     if (hex < r[0]) hi = mid - 1;
     else if (hex > r[1]) lo = mid + 1;
-    else return { country: r[2] || null, region: r[3] || null, asn: r[4] != null && r[4] !== '' ? 'AS' + r[4] : null, org: r[5] || null };
+    else return rowToFields(r);
   }
   return null;
 }
 
-// 返回 {country, region, asn, org} 或 null。库未加载 / 无命中都如实返回 null，不猜。
+// 返回 {country, region, city, tz, asn, org} 或 null。库未加载 / 无命中都如实返回 null，不猜。
 export async function lookup(ip, env) {
   const c = await load(env);
   if (c.meta.status !== 'ready') return null;
@@ -306,7 +330,7 @@ export async function lookup(ip, env) {
     const n = ipv4ToInt(ip);
     const firstOctet = Number(ip.split('.')[0]);
     let rows;
-    if (c.mode === 'shard' || c.mode === 'shard6') {
+    if (c.mode === 'shard' || c.mode === 'shard6' || c.mode === 'shard8') {
       try { rows = await shardRows(env, firstOctet, n, c); }
       catch (e) { return null; }
     } else {
@@ -321,7 +345,7 @@ export async function lookup(ip, env) {
     const hex = toHex32(v);
     const firstByte = hex.slice(0, 2);
     let rows;
-    if (c.mode === 'shard6') {
+    if (c.mode === 'shard6' || c.mode === 'shard8') {
       try { rows = await shardRows6(env, firstByte, hex, c); }
       catch (e) { return null; }
     } else {

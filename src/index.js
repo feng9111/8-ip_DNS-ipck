@@ -1,4 +1,5 @@
-// 8号 ip_DNS综合查询测试站 h18 · CF Worker 入口
+// 8号 ip_DNS综合查询测试站 h19 · CF Worker 入口
+// h19：清掉页面/政策里所有「CF 边缘提供归属字段」的旧口径；查询逻辑未动。
 // h18：IP 归属统一只读离线库；CF 边缘仅提供 cf-connecting-ip。
 // h17：离线库已随包自带，部署路径零脚本；运行时只读一个静态分片。
 // h16：装库搬到部署构建阶段（tools/build-lib.mjs），运行时零下载/零解压/零解析，修掉 Error 1102。
@@ -93,7 +94,6 @@ export default {
     // 5) API
     if (pathname === '/api/health') {
       const hasCfIp = !!request.headers.get('cf-connecting-ip');
-      const cfKeys = Object.keys(request.cf || {}).sort();
       return json({
         ok: true,
         site: SITE.name,
@@ -104,10 +104,9 @@ export default {
         policyVersion: SITE.policyVersion,
         edge: {
           hasCfConnectingIp: hasCfIp,
-          cfMetaKeys: cfKeys,
           hint: hasCfIp
-            ? 'edge OK: IP/GeoIP fields available'
-            : 'no cf-connecting-ip: set the hostname to proxied (orange cloud) and bind the route to this Worker',
+            ? 'connecting IP present; attribution from offline library only'
+            : 'no connecting IP header: proxy the hostname (orange cloud) and bind the route to this Worker',
         },
         lib: await libMeta(env),
         attribution: ATTRIBUTION,

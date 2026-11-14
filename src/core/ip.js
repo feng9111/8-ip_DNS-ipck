@@ -1,4 +1,4 @@
-// 8号 h18 · IP 归属（统一数据源）
+// 8号 h20 · IP 归属（统一数据源）
 //   本机模式与「输入任意 IP」模式，全部只读随站部署的 DB-IP Lite 离线库。
 //   Cloudflare 边缘只提供 cf-connecting-ip 这一个「本次连接的 IP 字符串」；
 //   request.cf 里的 country / region / city / asn / asOrganization / timezone 一律
@@ -40,8 +40,8 @@ function precision() {
     country: 'IP-range registration, library field',
     region: 'IP-range registration, library field; absent for some ranges',
     asn: 'IP-range registration, autonomous system of the announcing network',
-    city: 'library estimate, not exact physical location; not emitted in this build',
-    tz: 'not a library field; not emitted in this build',
+    city: 'library estimate, not exact physical location; emitted when the library provides it',
+    tz: 'library timezone field; absent for some ranges',
   };
 }
 
@@ -88,7 +88,7 @@ async function fromLibrary(ip, env, mode, ipVersion, pre) {
   if (ip == null) {
     return Object.assign(base, {
       status: 'no-ip',
-      message: 'Cloudflare did not inject cf-connecting-ip for this request. No IP was looked up.',
+      message: 'This request carried no connecting-IP header. No IP was looked up.',
     });
   }
   if (lib.status !== 'ready') {
@@ -107,10 +107,10 @@ async function fromLibrary(ip, env, mode, ipVersion, pre) {
   const fields = {
     country: hit.country || null,
     region: hit.region || null,
-    city: null, // 城市是库估计，本版不输出，避免假装精确
+    city: hit.city || null,
     asn: hit.asn || null,
     isp: hit.org || null,
-    tz: null,
+    tz: hit.tz || null,
     colo: null,
   };
   return Object.assign(base, {
